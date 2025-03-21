@@ -1,7 +1,3 @@
-Here’s a `README.md` tailored for your project combining dataset scraping, fine-tuning a CodeLLaMA model on Azure ML, and registering it for future deployment:
-
----
-
 # 🧠 Tech-CodeLLM: Fine-Tuned CodeLLaMA on Tech Industry Data
 
 This project builds a domain-specific generative AI using [CodeLLaMA-13B](https://huggingface.co/codellama/CodeLlama-13b-hf), fine-tuned on technical documentation, developer Q&A, and GitHub issues related to cloud platforms (Azure, AWS, GCP) and programming resources (e.g., GeeksforGeeks, Stack Overflow). It uses LoRA for efficient fine-tuning and leverages Azure ML for training, storage, and model registry.
