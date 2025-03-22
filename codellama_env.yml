@@ -1,0 +1,15 @@
+name: codellama-env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - transformers==4.35.2
+      - accelerate==0.23.0
+      - torch==2.1.0
+      - datasets==2.15.0
+      - peft==0.6.2
+      - safetensors==0.4.0
+      - sentencepiece
