@@ -14,8 +14,13 @@ print("Connected to Azure ML Workspace:", ws.name)
 # Set Compute Target
 compute_target = "codegen-cluster"
 
+all_datasets = Dataset.get_all(ws)
+print("Datasets in workspace:")
+for d in all_datasets:
+    print(f"- {d.name}")
+
 # Load dataset from Azure ML
-dataset = Dataset.get_by_name(ws, name="instruction_dataset")
+dataset = Dataset.get_by_name(ws, name="instruction_dataset", version="1")
 dataset_path = dataset.download(target_path="./", overwrite=True)
 
 # Define model and dataset
@@ -26,13 +31,34 @@ OUTPUT_DIR = "./output_finetuned_model"
 # Load model and tokenizer
 model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+tokenizer.pad_token = tokenizer.eos_token
 
 def tokenize_function(examples):
-    return tokenizer(examples["instruction"], truncation=True, padding="max_length", max_length=512)
+    if "instruction" in examples:
+        return tokenizer(examples["instruction"], truncation=True, padding="max_length", max_length=1000)
+    else:
+        prompts = [
+            "Explain the following code:\n\n" + row["content"]
+            for row in examples["row"]
+            if "content" in row
+        ]
+        return tokenizer(
+            prompts,
+            truncation=True,
+            padding="max_length",
+            max_length=1000
+        )
 
 # Load dataset
 dataset = load_dataset("json", data_files=DATASET_PATH)
-tokenized_datasets = dataset.map(tokenize_function, batched=True)
+train_dataset = dataset["train"]
+
+tokenized_dataset = train_dataset.map(
+    tokenize_function,
+    batched=True,
+    num_proc=4,
+    remove_columns=train_dataset.column_names  # ✅ access split directly
+)
 
 # Configure LoRA for efficient fine-tuning
 lora_config = LoraConfig(
@@ -82,7 +108,11 @@ Model.register(workspace=ws, model_path=OUTPUT_DIR, model_name="CodeLLaMA_13B_Fi
 print("Model registered in Azure ML.")
 
 # Configure environment for Azure ML
-env = Environment(name="codellama-env")
+env = Environment.from_conda_specification(
+    name="code-llama-env",
+    file_path="codellama_env.yml"
+)
+
 env.docker.enabled = True
 env.python.conda_dependencies.add_pip_package("transformers")
 env.python.conda_dependencies.add_pip_package("peft")
@@ -91,8 +121,8 @@ env.python.conda_dependencies.add_pip_package("datasets")
 # Submit training job to Azure ML
 script_config = ScriptRunConfig(
     source_directory=".",
-    script="azure_ml_finetune_codellama.py",
-    compute_target=compute_target,
+    script="azure_ml_finetune.py",
+    compute_target="codegen-cluster",
     environment=env
 )
 
