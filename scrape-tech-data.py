@@ -8,7 +8,7 @@ from azure.storage.blob import BlobServiceClient
 import os
 
 # Hugging Face API Configuration
-HF_TOKEN = os.getenv("HF_TOKEN")  # Replace with your Hugging Face token
+HF_TOKEN = os.getevn("HF_TOKEN")  # Replace with your Hugging Face token
 HF_API_URL = "https://datasets-server.huggingface.co/rows"
 DATASET_NAME = "bigcode/starcoderdata"
 CONFIG = "default"
@@ -70,7 +70,14 @@ def fetch_starcoder_data(offset=0, length=TOTAL_LENGTH, batch_size=BATCH_SIZE):
 
                     # Write rows to file
                     for row in rows:
-                        file.write(json.dumps(row) + "\n")
+                        content = row.get("row", {}).get("content", "")
+                        if content:
+                            formatted_row = {
+                                "instruction": "Explain the following code snippet.",
+                                "input": "",
+                                "response": content
+                            }
+                            file.write(json.dumps(formatted_row) + "\n")
 
                     # Save checkpoint
                     new_offset = start + len(rows)
@@ -115,6 +122,7 @@ def scrape_docs(base_url, sitemap_url, source_name):
             time.sleep(1)  # Avoid rate limiting
     
     return dataset
+
 
 def scrape_stackoverflow():
     """Scrape top Azure questions from Stack Overflow"""
