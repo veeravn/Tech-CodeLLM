@@ -3,16 +3,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments,
 from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
 import os
-from azureml.core import Workspace, Dataset, Experiment, ScriptRunConfig, Environment, Model
+from azureml.core import Workspace, Dataset, Model
 
 # Connect to Azure ML Workspace
 ws = Workspace(subscription_id="7cc0da73-46c1-4826-a73b-d7e49a39d6c1",
                resource_group="custom-tech-llm",
                workspace_name="Tech-LLM")
 print("Connected to Azure ML Workspace:", ws.name)
-
-# Set Compute Target
-compute_target = "codegen-cluster"
 
 # Load dataset from Azure ML
 dataset = Dataset.get_by_name(ws, name="instruction_dataset", version="1")
@@ -32,33 +29,22 @@ def tokenize_function(examples):
     prompts = []
 
     if "instruction" in examples:
-        # Instruction-tuned data
-        instructions = examples.get("instruction", [""] * len(examples["instruction"]))
-        inputs = examples.get("input", [""] * len(instructions))
-
+        instructions = examples.get("instruction", ["" for _ in range(len(examples["instruction"]))])
+        inputs = examples.get("input", ["" for _ in range(len(instructions))])
         prompts = [
             f"{inst.strip()}\n{inp.strip()}" if inp else inst.strip()
             for inst, inp in zip(instructions, inputs)
         ]
-
     elif "row" in examples:
-        # StarCoder-style data with code in examples["row"][i]["content"]
-        rows = examples["row"]
-        for row in rows:
+        for row in examples["row"]:
             content = row.get("content", "").strip()
             prompt = f"Explain the following code:\n{content}" if content else "Explain the following code."
             prompts.append(prompt)
-
     else:
-        # Fallback if neither format is found
         prompts = ["Explain the following code."] * len(examples[next(iter(examples))])
 
-    return tokenizer(
-        prompts,
-        truncation=True,
-        padding="max_length",
-        max_length=1000
-    )
+    return tokenizer(prompts, truncation=True, padding="max_length", max_length=1000)
+
 # Load dataset and tokenize
 dataset = load_dataset("json", data_files=DATASET_PATH)
 train_dataset = dataset["train"]
@@ -123,24 +109,32 @@ print(f"Model fine-tuned and saved at {OUTPUT_DIR}")
 Model.register(workspace=ws, model_path=OUTPUT_DIR, model_name="CodeLLaMA_13B_Finetuned")
 print("Model registered in Azure ML.")
 
-# Configure environment for Azure ML
-env = Environment(name="codellama-env")
-env.docker.enabled = True
-env.python.conda_dependencies.add_pip_package("transformers")
-env.python.conda_dependencies.add_pip_package("peft")
-env.python.conda_dependencies.add_pip_package("datasets")
-env.python.conda_dependencies.add_pip_package("accelerate")
-env.python.conda_dependencies.add_pip_package("torch")
-env.python.conda_dependencies.add_pip_package("safetensors")
+# Optional: SDK-based job submission (for automation or CLI override)
+def submit_job_from_sdk(ws, compute_target):
+    from azureml.core import Environment, ScriptRunConfig, Experiment
 
-# Submit training job to Azure ML
-script_config = ScriptRunConfig(
-    source_directory=".",
-    script="azure_ml_finetune.py",
-    compute_target=compute_target,
-    environment=env
-)
+    env = Environment(name="codellama-env")
+    env.docker.enabled = True
+    env.python.conda_dependencies.add_pip_package("transformers")
+    env.python.conda_dependencies.add_pip_package("peft")
+    env.python.conda_dependencies.add_pip_package("datasets")
+    env.python.conda_dependencies.add_pip_package("accelerate")
+    env.python.conda_dependencies.add_pip_package("torch")
+    env.python.conda_dependencies.add_pip_package("safetensors")
 
-experiment = Experiment(workspace=ws, name="CodeLLaMA-Finetuning")
-run = experiment.submit(script_config)
-print("Job submitted. View logs in Azure ML Studio.")
+    script_config = ScriptRunConfig(
+        source_directory=".",
+        script="azure_ml_finetune.py",
+        compute_target=compute_target,
+        environment=env
+    )
+
+    experiment = Experiment(workspace=ws, name="CodeLLaMA-Finetuning")
+    run = experiment.submit(script_config)
+    print("✅ Job submitted. View logs in Azure ML Studio.")
+
+# Uncomment to enable SDK-based job submission
+# override_submission = False
+# if override_submission:
+#     compute_target = "codegen-cluster"
+#     submit_job_from_sdk(ws, compute_target)

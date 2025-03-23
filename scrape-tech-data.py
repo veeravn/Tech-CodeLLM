@@ -73,7 +73,7 @@ def fetch_starcoder_data(offset=0, length=TOTAL_LENGTH, batch_size=BATCH_SIZE):
                         content = row.get("row", {}).get("content", "")
                         if content:
                             formatted_row = {
-                                "instruction": "Explain the following code snippet.",
+                                "instruction": "Explain the following tech documentation.",
                                 "input": "",
                                 "response": content
                             }
