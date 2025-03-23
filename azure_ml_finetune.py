@@ -108,33 +108,3 @@ print(f"Model fine-tuned and saved at {OUTPUT_DIR}")
 
 Model.register(workspace=ws, model_path=OUTPUT_DIR, model_name="CodeLLaMA_13B_Finetuned")
 print("Model registered in Azure ML.")
-
-# Optional: SDK-based job submission (for automation or CLI override)
-def submit_job_from_sdk(ws, compute_target):
-    from azureml.core import Environment, ScriptRunConfig, Experiment
-
-    env = Environment(name="codellama-env")
-    env.docker.enabled = True
-    env.python.conda_dependencies.add_pip_package("transformers")
-    env.python.conda_dependencies.add_pip_package("peft")
-    env.python.conda_dependencies.add_pip_package("datasets")
-    env.python.conda_dependencies.add_pip_package("accelerate")
-    env.python.conda_dependencies.add_pip_package("torch")
-    env.python.conda_dependencies.add_pip_package("safetensors")
-
-    script_config = ScriptRunConfig(
-        source_directory=".",
-        script="azure_ml_finetune.py",
-        compute_target=compute_target,
-        environment=env
-    )
-
-    experiment = Experiment(workspace=ws, name="CodeLLaMA-Finetuning")
-    run = experiment.submit(script_config)
-    print("✅ Job submitted. View logs in Azure ML Studio.")
-
-# Uncomment to enable SDK-based job submission
-# override_submission = False
-# if override_submission:
-#     compute_target = "codegen-cluster"
-#     submit_job_from_sdk(ws, compute_target)
