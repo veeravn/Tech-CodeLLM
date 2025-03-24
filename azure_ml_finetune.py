@@ -1,110 +1,139 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
 import os
-from azureml.core import Workspace, Dataset, Model
+import argparse
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import Model as MLModel
+from azure.ai.ml.entities import ManagedOnlineEndpoint, ManagedOnlineDeployment
+from azure.ai.ml.exceptions import ResourceNotFoundError
+from azure.identity import DefaultAzureCredential
 
-# Connect to Azure ML Workspace
-ws = Workspace(subscription_id="7cc0da73-46c1-4826-a73b-d7e49a39d6c1",
-               resource_group="custom-tech-llm",
-               workspace_name="Tech-LLM")
-print("Connected to Azure ML Workspace:", ws.name)
+# Parse arguments for dataset path
+parser = argparse.ArgumentParser()
+parser.add_argument("--data_path", type=str, required=True)
+args = parser.parse_args()
 
-# Load dataset from Azure ML
-dataset = Dataset.get_by_name(ws, name="instruction_dataset", version="1")
-dataset_path = dataset.download(target_path="./", overwrite=True)
-
-# Define model and dataset
-MODEL_NAME = "codellama/CodeLlama-13b-hf"
-DATASET_PATH = "./instruction_dataset.jsonl"
 OUTPUT_DIR = "./output_finetuned_model"
+MODEL_NAME = "codellama/CodeLlama-13b-hf"
 
-# Load model and tokenizer
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-tokenizer.pad_token = tokenizer.eos_token
+# Authenticate with Azure ML using Managed Identity
+def main(data_path):
+    credential = DefaultAzureCredential()
+    ml_client = MLClient(
+        credential=credential,
+        subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
+        resource_group_name=os.environ["AZURE_RESOURCE_GROUP"],
+        workspace_name=os.environ["AZURE_WORKSPACE_NAME"]
+    )
+    print("Connected to Azure ML Workspace:", ml_client.workspace_name)
 
-def tokenize_function(examples):
-    prompts = []
+    # Load model and tokenizer
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16, device_map="auto")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-    if "instruction" in examples:
-        instructions = examples.get("instruction", ["" for _ in range(len(examples["instruction"]))])
-        inputs = examples.get("input", ["" for _ in range(len(instructions))])
-        prompts = [
-            f"{inst.strip()}\n{inp.strip()}" if inp else inst.strip()
-            for inst, inp in zip(instructions, inputs)
-        ]
-    elif "row" in examples:
-        for row in examples["row"]:
-            content = row.get("content", "").strip()
-            prompt = f"Explain the following code:\n{content}" if content else "Explain the following code."
-            prompts.append(prompt)
-    else:
-        prompts = ["Explain the following code."] * len(examples[next(iter(examples))])
+    def tokenize_function(examples):
+        return tokenizer(examples["instruction"], truncation=True, padding="max_length", max_length=512)
 
-    return tokenizer(prompts, truncation=True, padding="max_length", max_length=1000)
+    # Load dataset
+    dataset = load_dataset("json", data_files=data_path)
+    tokenized_datasets = dataset.map(tokenize_function, batched=True)
 
-# Load dataset and tokenize
-dataset = load_dataset("json", data_files=DATASET_PATH)
-train_dataset = dataset["train"]
-tokenized_dataset = train_dataset.map(
-    tokenize_function,
-    batched=True,
-    num_proc=4,
-    remove_columns=train_dataset.column_names
-)
+    # LoRA config
+    lora_config = LoraConfig(
+        r=8,
+        lora_alpha=16,
+        target_modules=["q_proj", "v_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
 
-# Use DataCollator for Causal LM
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer,
-    mlm=False
-)
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
-# Configure LoRA for efficient fine-tuning
-lora_config = LoraConfig(
-    r=8,
-    lora_alpha=16,
-    target_modules=["q_proj", "v_proj"],
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM"
-)
+    # Training arguments
+    training_args = TrainingArguments(
+        output_dir=OUTPUT_DIR,
+        evaluation_strategy="no",
+        save_strategy="epoch",
+        per_device_train_batch_size=2,
+        num_train_epochs=1,
+        learning_rate=2e-5,
+        fp16=True,
+        logging_dir="./logs"
+    )
 
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_datasets["train"],
+        eval_dataset=tokenized_datasets["train"][:100],
+    )
 
-# Training Arguments
-training_args = TrainingArguments(
-    output_dir=OUTPUT_DIR,
-    evaluation_strategy="steps",
-    eval_steps=500,
-    save_strategy="steps",
-    save_steps=500,
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
-    logging_dir="./logs",
-    num_train_epochs=3,
-    learning_rate=2e-5,
-    fp16=True,
-    push_to_hub=False,
-)
+    # Train model
+    print("Starting fine-tuning...")
+    trainer.train()
 
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized_dataset,
-    eval_dataset=tokenized_dataset.select(range(100)),
-    data_collator=data_collator
-)
+    # Save model and tokenizer
+    model.save_pretrained(OUTPUT_DIR)
+    tokenizer.save_pretrained(OUTPUT_DIR)
+    print(f"Model fine-tuned and saved at {OUTPUT_DIR}")
 
-# Train model
-trainer.train()
+    # Register model
+    ml_client.models.create_or_update(
+        MLModel(
+            name="CodeLLaMA_13B_Finetuned",
+            path=OUTPUT_DIR,
+            description="LoRA-finetuned CodeLLaMA 13B model on tech instructions"
+        )
+    )
+    print("Model registered in Azure ML.")
 
-# Save model to Azure ML Model Registry
-model.save_pretrained(OUTPUT_DIR)
-tokenizer.save_pretrained(OUTPUT_DIR)
-print(f"Model fine-tuned and saved at {OUTPUT_DIR}")
+    model_info = ml_client.models.create_or_update(...)
+    print(f"✅ Model registered: {model_info.name} v{model_info.version}")
+    deploy_latest_model(ml_client, model_info.name, model_info.version)
 
-Model.register(workspace=ws, model_path=OUTPUT_DIR, model_name="CodeLLaMA_13B_Finetuned")
-print("Model registered in Azure ML.")
+def deploy_latest_model(ml_client, model_name: str, model_version: str):
+    endpoint_name = "techllm-endpoint"
+    deployment_name = "blue"
+
+    # Check if endpoint exists
+    try:
+        ml_client.online_endpoints.get(name=endpoint_name)
+        print(f"✅ Endpoint '{endpoint_name}' exists.")
+    except ResourceNotFoundError:
+        # Create it
+        endpoint = ManagedOnlineEndpoint(
+            name=endpoint_name,
+            auth_mode="key"
+        )
+        ml_client.online_endpoints.begin_create_or_update(endpoint).result()
+        print(f"🆕 Created new endpoint '{endpoint_name}'.")
+
+    # Create or update deployment
+    deployment = ManagedOnlineDeployment(
+        name=deployment_name,
+        endpoint_name=endpoint_name,
+        model=f"{model_name}:{model_version}",
+        instance_type="Standard_NC6",  # or Standard_DS3_v2 if CPU
+        instance_count=1,
+        environment_variables={"TRANSFORMERS_CACHE": "/tmp"},
+    )
+    ml_client.online_deployments.begin_create_or_update(deployment).result()
+
+    # Set traffic to 100%
+    ml_client.online_endpoints.begin_update(
+        name=endpoint_name,
+        traffic={"blue": 100}
+    ).result()
+
+    print(f"🚀 Deployed model {model_name}:{model_version} to '{endpoint_name}' with 100% traffic.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_path", required=True, help="Path to dataset (.jsonl)")
+    args = parser.parse_args()
+    main(args.data_path)

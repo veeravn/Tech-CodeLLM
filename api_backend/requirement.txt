@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+transformers
+peft
+datasets
+pyjwt
+python-multipart
