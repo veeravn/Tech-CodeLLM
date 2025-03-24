@@ -7,7 +7,7 @@ import argparse
 from azure.ai.ml import MLClient
 from azure.ai.ml.entities import Model as MLModel
 from azure.ai.ml.entities import ManagedOnlineEndpoint, ManagedOnlineDeployment
-from azure.ai.ml.exceptions import ResourceNotFoundError
+from azure.core.exceptions import HttpResponseError
 from azure.identity import DefaultAzureCredential
 
 # Parse arguments for dataset path
@@ -20,6 +20,9 @@ MODEL_NAME = "codellama/CodeLlama-13b-hf"
 
 # Authenticate with Azure ML using Managed Identity
 def main(data_path):
+    print("🚀 Script started")
+    print(f"Data path argument received: {data_path}")
+    print("Loading dataset...")
     credential = DefaultAzureCredential()
     ml_client = MLClient(
         credential=credential,
@@ -32,10 +35,17 @@ def main(data_path):
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16, device_map="auto")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer.pad_token = tokenizer.eos_token
 
     def tokenize_function(examples):
-        return tokenizer(examples["instruction"], truncation=True, padding="max_length", max_length=512)
-
+        tokens = tokenizer(
+            examples["instruction"],
+            truncation=True,
+            padding="max_length",
+            max_length=512
+        )
+        tokens["labels"] = tokens["input_ids"].copy()
+        return tokens
     # Load dataset
     dataset = load_dataset("json", data_files=data_path)
     tokenized_datasets = dataset.map(tokenize_function, batched=True)
@@ -103,12 +113,18 @@ def deploy_latest_model(ml_client, model_name: str, model_version: str):
     try:
         ml_client.online_endpoints.get(name=endpoint_name)
         print(f"✅ Endpoint '{endpoint_name}' exists.")
-    except ResourceNotFoundError:
+    except HttpResponseError as e:
         # Create it
-        endpoint = ManagedOnlineEndpoint(
-            name=endpoint_name,
-            auth_mode="key"
-        )
+        if "NotFound" in str(e):
+            print(f"Endpoint '{endpoint_name}' not found, creating it.")
+            # create endpoint
+            endpoint = ManagedOnlineEndpoint(
+                name=endpoint_name,
+                auth_mode="key"
+            )
+        else:
+            raise
+        
         ml_client.online_endpoints.begin_create_or_update(endpoint).result()
         print(f"🆕 Created new endpoint '{endpoint_name}'.")
 
