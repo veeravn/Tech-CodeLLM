@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from azure.storage.blob import BlobServiceClient
 from .rotate_chat_history import rotate_chat_history
+from .continuous_train_trigger import trigger_training
 
 AZURE_STORAGE_CONNECTION_STRING = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
 CONTAINER_NAME = os.environ["CONTAINER_NAME"]
@@ -88,5 +89,5 @@ def scrape_and_trigger():
     upload_to_blob(filename, filename)
 
     # Trigger fine-tuning
-    os.system(f"python3 continuous_train_trigger.py --data_path {filename}")
+    trigger_training(filename)
 

@@ -1,18 +1,27 @@
 from azure.ai.ml import MLClient, Input, command
+from azure.ai.ml.entities import CommandJob
+from azure.ai.ml.entities import Environment
 from azure.identity import DefaultAzureCredential
+from azure_ml_env_setup import submit_finetune_job
 import argparse
+import os
 
-# Authenticate and connect to Azure ML
+# Workspace config
+SUBSCRIPTION_ID = "7cc0da73-46c1-4826-a73b-d7e49a39d6c1"
+RESOURCE_GROUP = "custom-tech-llm"
+WORKSPACE_NAME = "Tech-LLM"
+COMPUTE_NAME = "codegen-cluster"
+
 credential = DefaultAzureCredential()
 ml_client = MLClient(
     credential=credential,
-    subscription_id="7cc0da73-46c1-4826-a73b-d7e49a39d6c1",
-    resource_group_name="custom-tech-llm",
-    workspace_name="Tech-LLM"
+    subscription_id=SUBSCRIPTION_ID,
+    resource_group_name=RESOURCE_GROUP,
+    workspace_name=WORKSPACE_NAME
 )
 
-def submit_finetune_job(data_path):
-    # Define training job
+def trigger_training(data_path):
+
     job = command(
         code="./",
         command="python azure_ml_finetune.py --data_path ${{inputs.training_data}}",
@@ -41,7 +50,6 @@ def submit_finetune_job(data_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", required=True, help="Full path to the dataset (URI or SAS URL)")
+    parser.add_argument("--data_path", required=True, help="Path to the new dataset JSONL file")
     args = parser.parse_args()
-
-    submit_finetune_job(args.data_path)
+    trigger_training(args.data_path)
