@@ -1,5 +1,7 @@
+import datetime
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+from transformers.trainer_utils import get_last_checkpoint
 from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
 import os
@@ -15,14 +17,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--data_path", type=str, required=True)
 args = parser.parse_args()
 
-OUTPUT_DIR = "./output_finetuned_model"
+OUTPUT_DIR = "/outputs"
 MODEL_NAME = "codellama/CodeLlama-13b-hf"
 
 # Authenticate with Azure ML using Managed Identity
 def main(data_path):
-    print("🚀 Script started")
-    print(f"Data path argument received: {data_path}")
-    print("Loading dataset...")
+    print("🚀 Starting fine-tuning script")
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
+
     credential = DefaultAzureCredential()
     ml_client = MLClient(
         credential=credential,
@@ -65,14 +67,18 @@ def main(data_path):
 
     # Training arguments
     training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        evaluation_strategy="no",
-        save_strategy="epoch",
+        output_dir=OUTPUT_DIR,               # stays fixed for easier resume
         per_device_train_batch_size=2,
-        num_train_epochs=1,
+        num_train_epochs=3,
         learning_rate=2e-5,
         fp16=True,
-        logging_dir="./logs"
+        logging_dir="./logs",
+        save_strategy="steps",                # ✅ checkpoint every N steps
+        save_steps=500,
+        save_total_limit=2,
+        logging_strategy="steps",
+        logging_steps=50,
+        remove_unused_columns=False           # ✅ needed for PEFT
     )
 
     trainer = Trainer(
@@ -81,10 +87,16 @@ def main(data_path):
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["train"][:100],
     )
-
     # Train model
     print("Starting fine-tuning...")
-    trainer.train()
+    last_checkpoint = get_last_checkpoint(training_args.output_dir)
+
+    if last_checkpoint is not None:
+        print(f"🔁 Resuming from checkpoint: {last_checkpoint}")
+        trainer.train(resume_from_checkpoint=last_checkpoint)
+    else:
+        print("🚀 Starting fresh training run.")
+        trainer.train()
 
     # Save model and tokenizer
     model.save_pretrained(OUTPUT_DIR)
@@ -92,16 +104,14 @@ def main(data_path):
     print(f"Model fine-tuned and saved at {OUTPUT_DIR}")
 
     # Register model
-    ml_client.models.create_or_update(
+    model_info = ml_client.models.create_or_update(
         MLModel(
             name="CodeLLaMA_13B_Finetuned",
             path=OUTPUT_DIR,
-            description="LoRA-finetuned CodeLLaMA 13B model on tech instructions"
+            description="Fine-tuned CodeLLaMA 13B on tech dataset",
+            tags={"timestamp": timestamp, "source": os.path.basename(data_path)}
         )
     )
-    print("Model registered in Azure ML.")
-
-    model_info = ml_client.models.create_or_update(...)
     print(f"✅ Model registered: {model_info.name} v{model_info.version}")
     deploy_latest_model(ml_client, model_info.name, model_info.version)
 
