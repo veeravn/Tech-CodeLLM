@@ -1,11 +1,11 @@
 from fastapi import FastAPI
-from api_backend.chat_logger import router as chat_logger_router
-from api_backend.inference import router as inference_router
-from api_backend.history import router as history_router
+from routes.inference import router as inference_router
+from routes.log import router as log_router
+from routes.health import router as health_router
 
 app = FastAPI(title="Custom Tech LLM API")
 
-# Register endpoints
-app.include_router(chat_logger_router)
+# Register route modules
 app.include_router(inference_router)
-app.include_router(history_router)
+app.include_router(log_router)
+app.include_router(health_router)

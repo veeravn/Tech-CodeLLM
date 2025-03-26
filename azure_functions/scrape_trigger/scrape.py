@@ -2,8 +2,8 @@ import requests, os, json
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from azure.storage.blob import BlobServiceClient
-from .rotate_chat_history import rotate_chat_history
-from .continuous_train_trigger import trigger_training
+from ..chat_rotate_trigger.rotate_chat_history import rotate_chat_history
+from ..train_trigger.continuous_train_trigger import trigger_training
 
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 CONTAINER_NAME = "tech-instruction-dataset"
