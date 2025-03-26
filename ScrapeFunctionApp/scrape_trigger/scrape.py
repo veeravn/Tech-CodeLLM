@@ -5,9 +5,10 @@ from azure.storage.blob import BlobServiceClient
 from .rotate_chat_history import rotate_chat_history
 from .continuous_train_trigger import trigger_training
 
-AZURE_STORAGE_CONNECTION_STRING = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-CONTAINER_NAME = os.environ["CONTAINER_NAME"]
-
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+CONTAINER_NAME = "tech-instruction-dataset"
+DATASTORE_URI = "azureml://subscriptions/7cc0da73-46c1-4826-a73b-d7e49a39d6c1/resourcegroups/custom-tech-llm/workspaces/Tech-LLM/datastores/instructions/paths/"
+FILE_NAME = "new_data_today.jsonl"
 def scrape_stackoverflow():
     tags = ["azure", "aws", "cloud", "devops", "kubernetes"]
     dataset = []
@@ -33,7 +34,7 @@ def scrape_stackoverflow():
 def load_recent_chat_history(path="chat_history.jsonl", window_days=7):
     if not os.path.exists(path): return []
     recent = []
-    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    cutoff = datetime.now() - timedelta(days=window_days)
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             try:
@@ -56,10 +57,9 @@ def scrape_and_trigger():
     rotate_chat_history()
 
     # Load previous entries if the file exists
-    filename = "new_data_today.jsonl"
     seen_instructions = set()
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
@@ -79,15 +79,16 @@ def scrape_and_trigger():
             seen_instructions.add(instruction)  # Track it immediately
 
     # Write the deduplicated dataset
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(FILE_NAME, "w", encoding="utf-8") as f:
         for entry in unique_dataset:
             f.write(json.dumps(entry) + "\n")
 
     print(f"Final dataset contains {len(unique_dataset)} new unique entries.")
 
     # Upload to Azure Blob
-    upload_to_blob(filename, filename)
+    upload_to_blob(FILE_NAME, FILE_NAME)
 
     # Trigger fine-tuning
-    trigger_training(filename)
+    dataPath = f"{DATASTORE_URI}/{FILE_NAME}"
+    trigger_training(dataPath)
 
