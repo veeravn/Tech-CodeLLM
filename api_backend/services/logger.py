@@ -12,7 +12,7 @@ def append_chat_entry(instruction, response, input_text=""):
         "instruction": instruction.strip(),
         "input": input_text.strip(),
         "response": response.strip(),
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now().isoformat() + "Z"
     }
 
     seen_instructions = set()

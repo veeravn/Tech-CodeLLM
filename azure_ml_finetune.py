@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 from transformers.trainer_utils import get_last_checkpoint
@@ -23,7 +23,7 @@ MODEL_NAME = "codellama/CodeLlama-13b-hf"
 # Authenticate with Azure ML using Managed Identity
 def main(data_path):
     print("🚀 Starting fine-tuning script")
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M")
 
     credential = DefaultAzureCredential()
     ml_client = MLClient(

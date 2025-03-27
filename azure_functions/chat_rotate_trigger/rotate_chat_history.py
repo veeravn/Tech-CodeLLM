@@ -1,5 +1,5 @@
 import json
-import datetime
+from datetime import datetime
 from pathlib import Path
 
 CHAT_HISTORY_PATH = Path("chat_history.jsonl")
@@ -9,7 +9,7 @@ def rotate_chat_history():
         print("⚠️ chat_history.jsonl not found")
         return
 
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=7)
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=7)
     retained = []
 
     with open(CHAT_HISTORY_PATH, "r") as f:
