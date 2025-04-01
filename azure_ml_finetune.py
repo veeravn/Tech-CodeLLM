@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
 from transformers.trainer_utils import get_last_checkpoint
@@ -12,18 +12,13 @@ from azure.ai.ml.entities import ManagedOnlineEndpoint, ManagedOnlineDeployment
 from azure.core.exceptions import HttpResponseError
 from azure.identity import DefaultAzureCredential
 
-# Parse arguments for dataset path
-parser = argparse.ArgumentParser()
-parser.add_argument("--data_path", type=str, required=True)
-args = parser.parse_args()
-
-OUTPUT_DIR = "/outputs"
 MODEL_NAME = "codellama/CodeLlama-13b-hf"
 
 # Authenticate with Azure ML using Managed Identity
 def main(data_path):
     print("🚀 Starting fine-tuning script")
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     credential = DefaultAzureCredential()
     ml_client = MLClient(
@@ -36,18 +31,19 @@ def main(data_path):
 
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float16, device_map="auto")
+    model.config.use_cache = False
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
 
     def tokenize_function(examples):
-        tokens = tokenizer(
+        model_inputs = tokenizer(
             examples["instruction"],
             truncation=True,
             padding="max_length",
             max_length=512
         )
-        tokens["labels"] = tokens["input_ids"].copy()
-        return tokens
+        model_inputs["labels"] = model_inputs["input_ids"]
+        return model_inputs
     # Load dataset
     dataset = load_dataset("json", data_files=data_path)
     tokenized_datasets = dataset.map(tokenize_function, batched=True)
@@ -68,6 +64,8 @@ def main(data_path):
     # Training arguments
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,               # stays fixed for easier resume
+        evaluation_strategy="steps",
+        eval_steps=500,
         per_device_train_batch_size=2,
         num_train_epochs=3,
         learning_rate=2e-5,
@@ -78,6 +76,7 @@ def main(data_path):
         save_total_limit=2,
         logging_strategy="steps",
         logging_steps=50,
+        push_to_hub=False,
         remove_unused_columns=False           # ✅ needed for PEFT
     )
 
@@ -85,18 +84,15 @@ def main(data_path):
         model=model,
         args=training_args,
         train_dataset=tokenized_datasets["train"],
-        eval_dataset=tokenized_datasets["train"][:100],
+        eval_dataset = tokenized_datasets["train"].select(range(100)),
     )
     # Train model
-    print("Starting fine-tuning...")
-    last_checkpoint = get_last_checkpoint(training_args.output_dir)
+    print("🚀 Starting training (auto-resume enabled)...")
+    print(f"OutputDir: {OUTPUT_DIR}")
+    last_checkpoint = get_last_checkpoint(OUTPUT_DIR)
 
-    if last_checkpoint is not None:
-        print(f"🔁 Resuming from checkpoint: {last_checkpoint}")
-        trainer.train(resume_from_checkpoint=last_checkpoint)
-    else:
-        print("🚀 Starting fresh training run.")
-        trainer.train()
+    print(f"Last Checkpoint: {last_checkpoint}")
+    trainer.train(resume_from_checkpoint=last_checkpoint if last_checkpoint else None)
 
     # Save model and tokenizer
     model.save_pretrained(OUTPUT_DIR)
@@ -159,7 +155,15 @@ def deploy_latest_model(ml_client, model_name: str, model_version: str):
 
 
 if __name__ == "__main__":
+    # Parse arguments for dataset path
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", required=True, help="Path to dataset (.jsonl)")
+    parser.add_argument("--data_path", type=str, required=True, help="Path to training dataset")
+    parser.add_argument("--output_dir", type=str, required=True, help="Path to save model outputs")
     args = parser.parse_args()
-    main(args.data_path)
+
+    DATA_PATH = args.data_path
+    OUTPUT_DIR = args.output_dir
+    print(f"[INFO] Output directory set to: {OUTPUT_DIR}")
+    print("[DEBUG] Files in output directory before training:")
+    print(os.listdir(OUTPUT_DIR))
+    main(DATA_PATH)
