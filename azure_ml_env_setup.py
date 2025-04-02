@@ -48,7 +48,8 @@ def submit_finetune_job(data_path):
         "AZURE_SUBSCRIPTION_ID": "7cc0da73-46c1-4826-a73b-d7e49a39d6c1",
         "AZURE_RESOURCE_GROUP": "custom-tech-llm",
         "AZURE_WORKSPACE_NAME": "Tech-LLM",
-        "AZURE_OUTPUT_DIR": job.outputs["model_output"]
+        "AZURE_OUTPUT_DIR": job.outputs["model_output"],
+        "AZURE_CLIENT_ID": "19751b29-8427-4fda-9aea-7221d0f6677d"
     }
 
     # Submit to experiment

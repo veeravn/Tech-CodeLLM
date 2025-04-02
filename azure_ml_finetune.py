@@ -140,7 +140,7 @@ def deploy_latest_model(ml_client, model_name: str, model_version: str):
         name=deployment_name,
         endpoint_name=endpoint_name,
         model=f"{model_name}:{model_version}",
-        instance_type="Standard_NC6",  # or Standard_DS3_v2 if CPU
+        instance_type="Standard_D2a_v4",
         instance_count=1,
         environment_variables={"TRANSFORMERS_CACHE": "/tmp"},
     )

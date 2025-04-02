@@ -6,7 +6,7 @@ dependencies:
   - python=3.10
   - pip
   - pip:
-      - azure-ai-ml
+      - azure-ai-ml==1.26.1
       - azure-identity
       - transformers==4.35.2
       - accelerate==0.23.0
