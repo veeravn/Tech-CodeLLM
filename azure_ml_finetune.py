@@ -21,7 +21,7 @@ def main(data_path):
     timestamp = datetime.now().strftime("%Y%m%d%H%M")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    credential = ManagedIdentityCredential()
+    credential = ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"])
     ml_client = MLClient(
         credential=credential,
         subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
