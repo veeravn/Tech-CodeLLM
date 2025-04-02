@@ -10,7 +10,8 @@ from azure.ai.ml import MLClient
 from azure.ai.ml.entities import Model as MLModel
 from azure.ai.ml.entities import ManagedOnlineEndpoint, ManagedOnlineDeployment
 from azure.core.exceptions import HttpResponseError
-from azure.identity import DefaultAzureCredential
+from azure.identity import ManagedIdentityCredential
+
 
 MODEL_NAME = "codellama/CodeLlama-13b-hf"
 
@@ -20,7 +21,7 @@ def main(data_path):
     timestamp = datetime.now().strftime("%Y%m%d%H%M")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    credential = DefaultAzureCredential()
+    credential = ManagedIdentityCredential()
     ml_client = MLClient(
         credential=credential,
         subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
@@ -102,7 +103,7 @@ def main(data_path):
     # Register model
     model_info = ml_client.models.create_or_update(
         MLModel(
-            name="CodeLLaMA_13B_Finetuned",
+            name="TechLLM-Model",
             path=OUTPUT_DIR,
             description="Fine-tuned CodeLLaMA 13B on tech dataset",
             tags={"timestamp": timestamp, "source": os.path.basename(data_path)}
