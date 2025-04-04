@@ -1,6 +1,6 @@
 from datetime import datetime
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, AutoConfig
 from transformers.trainer_utils import get_last_checkpoint
 from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
@@ -35,6 +35,9 @@ def main(data_path):
     model.config.use_cache = False
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
+    # Also save the base config so it appears in model_output/
+    config = AutoConfig.from_pretrained(MODEL_NAME)
+    config.save_pretrained(OUTPUT_DIR)
 
     def tokenize_function(examples):
         model_inputs = tokenizer(

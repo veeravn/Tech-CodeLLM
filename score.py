@@ -1,53 +1,55 @@
 import os
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
-from typing import List
-import logging
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Load model and tokenizer at startup
+base_model = None
+tokenizer = None
+
 def init():
-    global model, tokenizer
-    model_dir = os.getenv("AZUREML_MODEL_DIR", ".")
+    global base_model, tokenizer
 
+    # Get model directory injected by Azure ML
+    model_dir = os.path.join(os.getenv("AZUREML_MODEL_DIR", ""), "model_output")
+    offload_dir = "/tmp/offload"
+    os.makedirs("/tmp/offload", exist_ok=True)
+
+    # Load the base model (supports LoRA adapters + float16 if GPU available)
     base_model = AutoModelForCausalLM.from_pretrained(
         model_dir,
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto"
+        device_map="auto",
+        offload_folder="/tmp/offload"
     )
+    base_model.config.use_cache = True
+
+    # Load tokenizer and fix padding token
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Check for PEFT adapter
-    adapter_path = os.path.join(model_dir, "adapter_model.safetensors")
-    if os.path.exists(adapter_path):
-        print("Loading LoRA adapter...")
-        model = PeftModel.from_pretrained(base_model, model_dir)
-    else:
-        print("No LoRA adapter found, using base model.")
-        model = base_model
+    print(f"✅ Model and tokenizer loaded from: {model_dir}")
 
-    model.eval()
-    print("✅ Model and tokenizer loaded.")
 
-# Generate prediction
-def run(data):
+def run(raw_data):
+    global base_model, tokenizer
+
     try:
-        input_text = data.get("input") or data["data"]
-        inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True).to(model.device)
+        if isinstance(raw_data, str):
+            inputs = raw_data
+        elif isinstance(raw_data, dict) and "inputs" in raw_data:
+            inputs = raw_data["inputs"]
+        else:
+            return {"error": "Input format not recognized"}
 
+        # Tokenize input
+        input_tokens = tokenizer(inputs, return_tensors="pt", padding=True, truncation=True).to(base_model.device)
+
+        # Generate output
         with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=256,
-                temperature=0.7,
-                do_sample=True,
-                top_p=0.95,
-                top_k=50,
-            )
+            output_tokens = base_model.generate(**input_tokens, max_new_tokens=100)
 
-        decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        return {"output": decoded}
+        # Decode and return
+        result = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        return {"output": result}
+
     except Exception as e:
-        logging.exception("Error in scoring script")
         return {"error": str(e)}
